@@ -7,21 +7,23 @@ exports.createComplaint = async (req, res) => {
     const { blockName, roomNumber, complaintType, remarks, userId } = req.body;
 
     if (!blockName || !roomNumber || !complaintType) {
-      return res.status(400).json({ message: 'Missing required fields' });
+      return res.status(400).json({ message: 'Missing required fields: Block name, Room number, and Complaint type are required' });
     }
 
-    // Only SuperAdmin and regular Users can create complaints
-    const requester = req.user || {};
-    if (requester.role && !['SuperAdmin', 'User'].includes(requester.role)) {
-      return res.status(403).json({ message: 'You do not have permission to create complaints' });
+    let creatorId = req.user?.id || userId;
+    if (!creatorId) {
+      const firstUser = await User.findOne();
+      if (firstUser) {
+        creatorId = firstUser._id;
+      }
     }
 
     const complaint = new Complaint({
-      blockName,
-      roomNumber,
-      complaintType,
-      remarks,
-      createdBy: req.user?.id || userId,
+      blockName: String(blockName).trim(),
+      roomNumber: String(roomNumber).trim(),
+      complaintType: String(complaintType).trim(),
+      remarks: remarks ? String(remarks).trim() : '',
+      createdBy: creatorId,
     });
 
     if (req.file) {
@@ -30,8 +32,9 @@ exports.createComplaint = async (req, res) => {
 
     await complaint.save();
 
-    res.status(201).json({ message: 'Complaint created', complaint });
+    res.status(201).json({ message: 'Complaint created successfully', complaint });
   } catch (error) {
+    console.error('Failed to create complaint:', error);
     res.status(500).json({ message: 'Failed to create complaint', error: error.message });
   }
 };
@@ -41,50 +44,41 @@ exports.getStats = async (req, res) => {
     const requester = req.user;
     if (!requester) return res.status(401).json({ message: 'Unauthorized' });
 
+    const isSuperAdmin = requester.role && requester.role.toLowerCase() === 'superadmin';
+
     // SuperAdmin: global stats
-    if (requester.role === 'SuperAdmin') {
+    if (isSuperAdmin) {
       const all = await Complaint.find();
       const total = all.length;
       const pending = all.filter((c) => c.status === 'Pending').length;
-      const assigned = all.filter((c) => c.status === 'Assigned').length;
+      const assigned = all.filter((c) => c.status === 'Assigned' || c.status === 'In-Progress' || c.status === 'Onhold').length;
+      const inProgress = all.filter((c) => c.status === 'In-Progress').length;
+      const onhold = all.filter((c) => c.status === 'Onhold').length;
       const closed = all.filter((c) => c.status === 'Closed').length;
-      return res.json({ total, pending, assigned, closed });
+      return res.json({ total, pending, assigned, inProgress, onhold, closed });
     }
 
-    // Staff/Technician: stats for complaints assigned to them or their department
-    if (!['SuperAdmin', 'User'].includes(requester.role)) {
-      let filter = { assignedTo: requester.id };
-      
-      // If staff has a department assigned, also get complaints for all staff in that dept
-      if (requester.department) {
-        const sameDeptStaff = await User.find({ department: requester.department }).select('_id');
-        const staffIds = sameDeptStaff.map(u => u._id);
-        filter = {
-          $or: [
-            { assignedTo: { $in: staffIds } },
-            { createdBy: requester.id }
-          ]
-        };
-      } else {
-        // Fallback: if no department, just show assigned to this user
-        filter = { assignedTo: requester.id };
-      }
-      
-      const assignedList = await Complaint.find(filter);
-      const total = assignedList.length;
-      const pending = assignedList.filter((c) => c.status === 'Pending').length;
-      const assigned = assignedList.filter((c) => c.status === 'Assigned').length;
-      const closed = assignedList.filter((c) => c.status === 'Closed').length;
-      return res.json({ total, pending, assigned, closed });
+    // For all other roles: stats for complaints created by or assigned to them
+    const requesterId = requester.id || requester._id;
+    let orConditions = [
+      { createdBy: requesterId },
+      { assignedTo: requesterId },
+    ];
+
+    if (requester.department) {
+      const sameDeptStaff = await User.find({ department: requester.department }).select('_id');
+      const staffIds = sameDeptStaff.map((u) => u._id);
+      orConditions.push({ assignedTo: { $in: staffIds } });
     }
 
-    // Regular User: stats for complaints created by them
-    const myList = await Complaint.find({ createdBy: requester.id });
-    const total = myList.length;
-    const pending = myList.filter((c) => c.status === 'Pending').length;
-    const assigned = myList.filter((c) => c.status === 'Assigned').length;
-    const closed = myList.filter((c) => c.status === 'Closed').length;
-    res.json({ total, pending, assigned, closed });
+    const list = await Complaint.find({ $or: orConditions });
+    const total = list.length;
+    const pending = list.filter((c) => c.status === 'Pending').length;
+    const assigned = list.filter((c) => c.status === 'Assigned' || c.status === 'In-Progress' || c.status === 'Onhold').length;
+    const inProgress = list.filter((c) => c.status === 'In-Progress').length;
+    const onhold = list.filter((c) => c.status === 'Onhold').length;
+    const closed = list.filter((c) => c.status === 'Closed').length;
+    res.json({ total, pending, assigned, inProgress, onhold, closed });
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch stats', error: error.message });
   }
@@ -95,8 +89,10 @@ exports.listComplaints = async (req, res) => {
     const requester = req.user;
     if (!requester) return res.status(401).json({ message: 'Unauthorized' });
 
+    const isSuperAdmin = requester.role && requester.role.toLowerCase() === 'superadmin';
+
     // SuperAdmin: all complaints
-    if (requester.role === 'SuperAdmin') {
+    if (isSuperAdmin) {
       const complaints = await Complaint.find()
         .populate({ path: 'createdBy', select: 'username email department', populate: { path: 'department', select: 'name' } })
         .populate({ path: 'assignedTo', select: 'username email role department', populate: { path: 'department', select: 'name' } })
@@ -104,31 +100,20 @@ exports.listComplaints = async (req, res) => {
       return res.json(complaints);
     }
 
-    // Staff/Technician: complaints assigned to them or their department
-    if (!['SuperAdmin', 'User'].includes(requester.role)) {
-      let filter = { assignedTo: requester.id };
-      
-      // If staff has a department assigned, also get complaints for all staff in that dept
-      if (requester.department) {
-        const sameDeptStaff = await User.find({ department: requester.department }).select('_id');
-        const staffIds = sameDeptStaff.map(u => u._id);
-        filter = {
-          $or: [
-            { assignedTo: { $in: staffIds } },
-            { createdBy: requester.id }
-          ]
-        };
-      }
+    // For all other users (User, Staff, Student, etc.): return complaints created by them or assigned to them
+    const requesterId = requester.id || requester._id;
+    let orConditions = [
+      { createdBy: requesterId },
+      { assignedTo: requesterId },
+    ];
 
-      const complaints = await Complaint.find(filter)
-        .populate({ path: 'createdBy', select: 'username email department', populate: { path: 'department', select: 'name' } })
-        .populate({ path: 'assignedTo', select: 'username email role department', populate: { path: 'department', select: 'name' } })
-        .sort({ createdAt: -1 });
-      return res.json(complaints);
+    if (requester.department) {
+      const sameDeptStaff = await User.find({ department: requester.department }).select('_id');
+      const staffIds = sameDeptStaff.map((u) => u._id);
+      orConditions.push({ assignedTo: { $in: staffIds } });
     }
 
-    // Regular User: complaints raised by them
-    const complaints = await Complaint.find({ createdBy: requester.id })
+    const complaints = await Complaint.find({ $or: orConditions })
       .populate({ path: 'createdBy', select: 'username email department', populate: { path: 'department', select: 'name' } })
       .populate({ path: 'assignedTo', select: 'username email role department', populate: { path: 'department', select: 'name' } })
       .sort({ createdAt: -1 });
@@ -167,56 +152,70 @@ exports.assignComplaint = async (req, res) => {
   }
 };
 
-// Assigned staff (or SuperAdmin) can update status to Closed
+// Update complaint status (SuperAdmin, Assigned staff, or Creator)
 exports.updateStatus = async (req, res) => {
   try {
     const requester = req.user;
     const complaintId = req.params.id;
-    let { status } = req.body; // expected 'Closed' or 'Completed'
+    let { status } = req.body;
     if (!status) return res.status(400).json({ message: 'status is required' });
 
-    // Accept 'Completed' as alias for 'Closed'
+    // Normalize common variations
     if (status === 'Completed') status = 'Closed';
+    if (status.toLowerCase() === 'in progress' || status.toLowerCase() === 'inprogress') status = 'In-Progress';
+    if (status.toLowerCase() === 'on hold' || status.toLowerCase() === 'onhold') status = 'Onhold';
+    if (status.toLowerCase() === 'pending') status = 'Pending';
+    if (status.toLowerCase() === 'assigned') status = 'Assigned';
+    if (status.toLowerCase() === 'closed') status = 'Closed';
 
     const allowedStatuses = ['Pending', 'Assigned', 'In-Progress', 'Onhold', 'Closed'];
     if (!allowedStatuses.includes(status)) {
-      return res.status(400).json({ message: 'Invalid status' });
+      return res.status(400).json({ message: `Invalid status. Allowed values: ${allowedStatuses.join(', ')}` });
     }
 
     const complaint = await Complaint.findById(complaintId)
-      .populate('assignedTo', '_id')
-      .populate('createdBy', '_id');
+      .populate('assignedTo', '_id username email role')
+      .populate('createdBy', '_id username email');
     if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
 
-    // If requester is SuperAdmin, allow any change
+    // SuperAdmin can change to any status
     if (requester.role === 'SuperAdmin') {
       complaint.status = status;
       await complaint.save();
-      const updated = await Complaint.findById(complaintId).populate('assignedTo', 'username email');
-      return res.json({ message: 'Status updated', complaint: updated });
+      const updated = await Complaint.findById(complaintId)
+        .populate('assignedTo', 'username email role')
+        .populate('createdBy', 'username email');
+      return res.json({ message: 'Status updated successfully', complaint: updated });
     }
 
-    // Staff/Technician: must be assignedTo and can set limited statuses
+    // Staff / Assignee / Creator check
     const isAssignee = complaint.assignedTo && String(complaint.assignedTo._id) === String(requester.id);
-    // Complaint creator may also be allowed to change certain statuses (e.g., Pending, Closed)
     const isCreator = complaint.createdBy && String(complaint.createdBy._id || complaint.createdBy) === String(requester.id);
 
-    if (!isAssignee && !isCreator) return res.status(403).json({ message: 'Only assigned staff or complaint creator can update status' });
+    if (!isAssignee && !isCreator) {
+      return res.status(403).json({ message: 'Only assigned staff, SuperAdmin, or complaint creator can update status' });
+    }
 
     if (isAssignee) {
       const staffAllowed = ['In-Progress', 'Onhold', 'Closed'];
-      if (!staffAllowed.includes(status)) return res.status(403).json({ message: 'Assigned staff cannot set this status' });
+      if (!staffAllowed.includes(status)) {
+        return res.status(403).json({ message: 'Assigned staff can only set In-Progress, Onhold, or Closed' });
+      }
     }
 
-    if (isCreator) {
+    if (isCreator && !isAssignee) {
       const creatorAllowed = ['Pending', 'Closed'];
-      if (!creatorAllowed.includes(status)) return res.status(403).json({ message: 'Complaint creator cannot set this status' });
+      if (!creatorAllowed.includes(status)) {
+        return res.status(403).json({ message: 'Creator can only set Pending or Closed' });
+      }
     }
 
     complaint.status = status;
     await complaint.save();
-    const updated = await Complaint.findById(complaintId).populate('assignedTo', 'username email');
-    res.json({ message: 'Status updated', complaint: updated });
+    const updated = await Complaint.findById(complaintId)
+      .populate('assignedTo', 'username email role')
+      .populate('createdBy', 'username email');
+    res.json({ message: 'Status updated successfully', complaint: updated });
   } catch (error) {
     res.status(500).json({ message: 'Failed to update status', error: error.message });
   }
@@ -226,44 +225,60 @@ exports.updateStatus = async (req, res) => {
 exports.generateReport = async (req, res) => {
   try {
     const requester = req.user;
-    if (!requester || requester.role !== 'SuperAdmin') return res.status(403).json({ message: 'Only SuperAdmin can generate reports' });
+    const isSuperAdmin = requester && requester.role && ['superadmin', 'admin'].includes(requester.role.toLowerCase());
+    if (!isSuperAdmin) {
+      return res.status(403).json({ message: 'Only SuperAdmin can generate reports' });
+    }
 
     const { department, programme, complaintType, status, assignee } = req.query;
 
     const filter = {};
-    if (complaintType) filter.complaintType = complaintType;
-    if (status) filter.status = status;
-    if (assignee) filter.assignedTo = assignee;
+    if (complaintType && complaintType !== 'All' && complaintType.trim()) {
+      filter.complaintType = new RegExp(`^${complaintType.trim()}$`, 'i');
+    }
+    if (status && status !== 'All' && status.trim()) {
+      filter.status = new RegExp(`^${status.trim()}$`, 'i');
+    }
+    if (assignee && assignee.trim()) {
+      filter.assignedTo = assignee.trim();
+    }
 
-    // If department or programme are provided, we need to lookup users in that department/programme and filter by createdBy
-    let createdByFilterIds = null;
+    // If department or programme are provided, filter by users in that department/programme
     if (department || programme) {
       const userQuery = {};
-      if (department) userQuery.department = department;
-      if (programme) userQuery.programme = programme;
-      const users = await User.find(userQuery).select('_id');
-      createdByFilterIds = users.map((u) => u._id);
-      if (createdByFilterIds.length === 0) {
-        // no users -> empty result
-        return res.json([]);
+      if (department && department.trim()) userQuery.department = department.trim();
+      if (programme && programme.trim()) userQuery.programme = programme.trim();
+
+      const matchedUsers = await User.find(userQuery).select('_id');
+      const userIds = matchedUsers.map((u) => u._id);
+
+      if (userIds.length > 0) {
+        filter.$or = [
+          { createdBy: { $in: userIds } },
+          { assignedTo: { $in: userIds } },
+        ];
       }
-      filter.createdBy = { $in: createdByFilterIds };
     }
 
     const complaints = await Complaint.find(filter)
       .populate({
         path: 'createdBy',
-        select: 'username email department programme',
+        select: 'username email role department programme',
         populate: [
           { path: 'department', select: 'name' },
-          { path: 'programme', select: 'name' }
-        ]
+          { path: 'programme', select: 'name' },
+        ],
       })
-      .populate({ path: 'assignedTo', select: 'username email role' })
+      .populate({
+        path: 'assignedTo',
+        select: 'username email role department',
+        populate: { path: 'department', select: 'name' },
+      })
       .sort({ createdAt: -1 });
 
     res.json(complaints);
   } catch (error) {
+    console.error('Failed to generate report:', error);
     res.status(500).json({ message: 'Failed to generate report', error: error.message });
   }
 };

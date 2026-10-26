@@ -18,6 +18,9 @@ const ReportsPage = () => {
     departmentService.getAll().then(r => setDepartments(r.data || [])).catch(() => {});
     programmeService.getAll().then(r => setProgrammes(r.data || [])).catch(() => {});
     userService.getAll().then(r => setUsers(r.data || [])).catch(() => {});
+    
+    // Load initial report
+    complaintService.report({}).then(res => setResults(res.data || [])).catch(() => {});
   }, [user]);
 
   const fetchReport = async () => {
@@ -68,7 +71,16 @@ const ReportsPage = () => {
             <option value="">All Programmes</option>
             {programmes.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
           </select>
-          <input placeholder="Complaint Type" value={filters.complaintType} onChange={e=>setFilters({...filters, complaintType:e.target.value})} />
+          <select value={filters.complaintType} onChange={e=>setFilters({...filters, complaintType:e.target.value})}>
+            <option value="">All Complaint Types</option>
+            <option value="PC Hardware">PC Hardware</option>
+            <option value="PC Software">PC Software</option>
+            <option value="Application Issues">Application Issues</option>
+            <option value="Network">Network</option>
+            <option value="Electronics">Electronics</option>
+            <option value="Plumbing">Plumbing</option>
+            <option value="Other">Other</option>
+          </select>
           <select value={filters.status} onChange={e=>setFilters({...filters, status:e.target.value})}>
             <option value="">All Statuses</option>
             <option value="Pending">Pending</option>

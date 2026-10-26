@@ -12,7 +12,7 @@ router.post(
   departmentController.createDepartment
 );
 
-router.get('/', authMiddleware, departmentController.getDepartments);
+router.get('/', departmentController.getDepartments);
 
 router.get(
   '/:id',

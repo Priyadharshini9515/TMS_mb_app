@@ -20,36 +20,45 @@ const ComplaintFormPage = () => {
   const [departmentId, setDepartmentId] = useState('');
   const [departments, setDepartments] = useState([]);
   const [blockId, setBlockId] = useState('');
+  const [customBlockName, setCustomBlockName] = useState('');
   const [roomId, setRoomId] = useState('');
   const [customRoomNumber, setCustomRoomNumber] = useState('');
   const [blocks, setBlocks] = useState([]);
+  const [allBlocksCache, setAllBlocksCache] = useState([]);
   const [filteredRooms, setFilteredRooms] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
 
-  // Fetch departments on mount
+  // Fetch departments and all blocks on mount
   useEffect(() => {
-    const fetchDepartments = async () => {
+    const fetchInitialData = async () => {
       try {
-        const resp = await departmentService.getAll();
-        const data = resp.data;
-        const list = Array.isArray(data) ? data : (data?.data || []);
-        setDepartments(list);
+        const [deptResp, blockResp] = await Promise.all([
+          departmentService.getAll(),
+          blockService.getAll(),
+        ]);
+        const dData = deptResp.data;
+        const dList = Array.isArray(dData) ? dData : (dData?.data || []);
+        setDepartments(dList);
+
+        const bData = blockResp.data;
+        const bList = Array.isArray(bData) ? bData : (bData?.data || []);
+        setAllBlocksCache(bList);
+        setBlocks(bList);
       } catch (err) {
-        console.error('Failed to fetch departments:', err);
-        setError(err.response?.data?.message || err.message || 'Failed to load departments');
+        console.error('Failed to fetch initial data:', err);
+        setError(err.response?.data?.message || err.message || 'Failed to load data');
       } finally {
         setLoadingData(false);
       }
     };
-    fetchDepartments();
+    fetchInitialData();
   }, []);
 
   // Fetch blocks when department is selected
   useEffect(() => {
     const fetchBlocks = async () => {
       if (!departmentId) {
-        setBlocks([]);
-        setBlockId('');
+        setBlocks(allBlocksCache);
         return;
       }
       setLoadingData(true);
@@ -57,26 +66,31 @@ const ComplaintFormPage = () => {
         const resp = await blockService.getAll({ departmentId });
         const data = resp.data;
         const list = Array.isArray(data) ? data : (data?.data || []);
-        setBlocks(list);
+        if (list.length > 0) {
+          setBlocks(list);
+        } else {
+          setBlocks(allBlocksCache);
+        }
       } catch (err) {
         console.error('Failed to fetch blocks:', err);
-        setError(err.response?.data?.message || err.message || 'Failed to load blocks');
+        setBlocks(allBlocksCache);
       } finally {
         setLoadingData(false);
       }
     };
     fetchBlocks();
     setBlockId('');
+    setCustomBlockName('');
     setRoomId('');
     setFilteredRooms([]);
-  }, [departmentId]);
+  }, [departmentId, allBlocksCache]);
 
   // Fetch rooms when block is selected
   useEffect(() => {
     const fetchRooms = async () => {
-      if (!blockId) {
+      if (!blockId || blockId === '__manual__') {
         setFilteredRooms([]);
-        setRoomId('');
+        setRoomId('__manual__');
         return;
       }
       setLoadingData(true);
@@ -127,6 +141,13 @@ const ComplaintFormPage = () => {
       const selectedBlock = blocks.find((b) => b._id === blockId);
       const selectedRoom = filteredRooms.find((r) => r._id === roomId);
 
+      const finalBlockName = blockId === '__manual__' ? customBlockName.trim() : (selectedBlock?.name || customBlockName.trim());
+      if (!finalBlockName) {
+        setError('Please select or enter a block name');
+        setLoading(false);
+        return;
+      }
+
       // validate room or custom room number
       const finalRoomNumber = roomId === '__manual__' ? customRoomNumber : (selectedRoom?.roomNumber || '');
       if (!finalRoomNumber) {
@@ -137,13 +158,11 @@ const ComplaintFormPage = () => {
 
       const formData = new FormData();
       formData.append('departmentName', selectedDepartment?.name || '');
-      formData.append('blockName', selectedBlock?.name || '');
+      formData.append('blockName', finalBlockName);
       formData.append('roomNumber', finalRoomNumber);
       formData.append('complaintType', type);
       formData.append('remarks', remarks);
       if (attachment) formData.append('attachment', attachment);
-      // user details come from token (backend should use req.user)
-      // but include user id here as convenience
       if (user?.id) formData.append('userId', user.id);
 
       await complaintService.create(formData);
@@ -177,15 +196,23 @@ const ComplaintFormPage = () => {
 
           <div className="form-group">
             <label>Block Name</label>
-            <select value={blockId} onChange={(e) => setBlockId(e.target.value)} required disabled={!departmentId || loadingData}>
+            <select value={blockId} onChange={(e) => setBlockId(e.target.value)} required disabled={loadingData}>
               <option value="">-- Select Block --</option>
               {blocks.map((block) => (
                 <option key={block._id} value={block._id}>
                   {block.name}
                 </option>
               ))}
+              <option value="__manual__">Other (enter manually)</option>
             </select>
           </div>
+
+          {(blockId === '__manual__' || (departmentId && blocks.length === 0)) && (
+            <div className="form-group">
+              <label>Enter Block Name</label>
+              <input value={customBlockName} onChange={(e) => setCustomBlockName(e.target.value)} placeholder="e.g. Science Block, Mech Block" required />
+            </div>
+          )}
 
           <div className="form-group">
             <label>Room Number</label>

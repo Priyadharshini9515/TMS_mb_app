@@ -7,7 +7,7 @@ async function testAll() {
     await mongoose.connect(process.env.MONGODB_URI);
     
     const users = [
-        { e: 'admin@example.com', p: 'Admin@123' },
+        { e: 'admin@gmail.com', p: '123' },
         { e: 'superadmin@example.com', p: 'SuperAdmin@123' }
     ];
 

@@ -57,15 +57,26 @@ exports.updateRole = async (req, res) => {
 
 exports.deleteRole = async (req, res) => {
   try {
-    const role = await Role.findByIdAndUpdate(
-      req.params.id,
-      { isActive: false },
-      { new: true }
-    );
+    const role = await Role.findById(req.params.id);
     if (!role) {
       return res.status(404).json({ message: 'Role not found' });
     }
-    res.json({ message: 'Role deleted successfully' });
+
+    const roleName = role.name;
+
+    // Hard delete or deactivate the role
+    await Role.findByIdAndDelete(req.params.id);
+
+    // Reassign any users who had this role back to default 'User' role
+    const User = require('../models/User');
+    const updateResult = await User.updateMany(
+      { role: { $regex: new RegExp(`^${roleName}$`, 'i') } },
+      { $set: { role: 'User' } }
+    );
+
+    res.json({
+      message: `Role "${roleName}" deleted successfully. ${updateResult.modifiedCount} user(s) reassigned to "User" role.`,
+    });
   } catch (error) {
     res.status(500).json({ message: 'Failed to delete role', error: error.message });
   }

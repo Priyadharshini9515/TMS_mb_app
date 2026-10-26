@@ -12,7 +12,7 @@ router.post(
   programmeController.createProgramme
 );
 
-router.get('/', authMiddleware, programmeController.getProgrammes);
+router.get('/', programmeController.getProgrammes);
 
 router.get(
   '/:id',

@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "TMS Mobile",
+    "slug": "tms-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#0F172A"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.tms.mobileapp"
+    },
+    "web": {},
+    "plugins": [
+      "expo-status-bar"
+    ]
+  }
+}

@@ -25,7 +25,10 @@ exports.getBlocks = async (req, res) => {
     if (departmentId) query.department = departmentId;
     if (programmeId) query.programme = programmeId;
 
-    const blocks = await Block.find(query).populate('department').populate('programme');
+    let blocks = await Block.find(query).populate('department').populate('programme');
+    if (departmentId && blocks.length === 0) {
+      blocks = await Block.find({ isActive: true }).populate('department').populate('programme');
+    }
     res.json(blocks);
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch blocks', error: error.message });

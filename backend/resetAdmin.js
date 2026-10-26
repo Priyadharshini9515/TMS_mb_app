@@ -3,7 +3,7 @@ const User = require('./models/User');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/tms_test';
+const MONGODB_URI = process.env.MONGODB_URI;
 
 async function verifyAndReset() {
     try {

@@ -12,7 +12,7 @@ router.post(
   roleController.createRole
 );
 
-router.get('/', authMiddleware, roleController.getRoles);
+router.get('/', roleController.getRoles);
 
 router.get(
   '/:id',

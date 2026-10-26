@@ -113,6 +113,7 @@ const ComplaintsDashboardPage = () => {
                   <th>Remarks</th>
                   <th>Status</th>
                   <th>Created By</th>
+                  <th>Assigned To</th>
                   <th>Attachment</th>
                   <th>Actions</th>
                 </tr>
@@ -120,6 +121,7 @@ const ComplaintsDashboardPage = () => {
               <tbody>
                 {complaints.map((c) => {
                   const isAssignee = c.assignedTo && String(c.assignedTo._id || c.assignedTo) === String(user?.id || user?._id);
+                  const canManage = user?.role === 'SuperAdmin' || isAssignee;
                   return (
                     <tr key={c._id}>
                       <td>{new Date(c.createdAt).toLocaleString()}</td>
@@ -127,20 +129,52 @@ const ComplaintsDashboardPage = () => {
                       <td>{c.roomNumber}</td>
                       <td>{c.complaintType}</td>
                       <td>{c.remarks || '-'}</td>
-                      <td>{c.status}</td>
+                      <td>
+                        <span className={`status-badge status-${(c.status || '').toLowerCase()}`}>
+                          {c.status}
+                        </span>
+                      </td>
                       <td>{c.createdBy?.username || c.createdBy?.email || '-'}</td>
+                      <td>{c.assignedTo?.username ? `${c.assignedTo.username} (${c.assignedTo.role || 'Staff'})` : <span style={{ color: '#e74c3c' }}>Unassigned</span>}</td>
                       <td>{c.attachment ? (<a href={`http://localhost:5000${c.attachment}`} target="_blank" rel="noreferrer">View</a>) : '-'}</td>
                       <td>
-                        <div className="actions-cell">
-                          {(isAssignee || user?.role === 'SuperAdmin') && c.status !== 'Closed' && (
-                            <button onClick={() => handleClose(c._id)} className="btn-primary" style={{ padding: '8px 12px' }}>Mark Completed</button>
+                        <div className="actions-cell" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {/* Quick 1-click status buttons */}
+                          {canManage && (
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                              {c.status !== 'In-Progress' && (
+                                <button
+                                  onClick={async () => { await complaintService.updateStatus(c._id, 'In-Progress'); refresh(); }}
+                                  style={{ padding: '4px 8px', fontSize: 11, background: '#e0e7ff', color: '#4338ca', border: '1px solid #c7d2fe', borderRadius: 4, cursor: 'pointer' }}
+                                >
+                                  ⚙️ In-Progress
+                                </button>
+                              )}
+                              {c.status !== 'Onhold' && (
+                                <button
+                                  onClick={async () => { await complaintService.updateStatus(c._id, 'Onhold'); refresh(); }}
+                                  style={{ padding: '4px 8px', fontSize: 11, background: '#f3e8ff', color: '#7e22ce', border: '1px solid #e9d5ff', borderRadius: 4, cursor: 'pointer' }}
+                                >
+                                  ⏸️ On Hold
+                                </button>
+                              )}
+                              {c.status !== 'Closed' && (
+                                <button
+                                  onClick={async () => { await complaintService.updateStatus(c._id, 'Closed'); refresh(); }}
+                                  style={{ padding: '4px 8px', fontSize: 11, background: '#d1fae5', color: '#047857', border: '1px solid #a7f3d0', borderRadius: 4, cursor: 'pointer' }}
+                                >
+                                  ✅ Close
+                                </button>
+                              )}
+                            </div>
                           )}
 
+                          {/* SuperAdmin Assign control */}
                           {user?.role === 'SuperAdmin' && (
                             assignTarget.complaintId === c._id ? (
                               <div className="actions-cell">
                                 <select value={assignTarget.assignee} onChange={(e) => setAssignTarget({ ...assignTarget, assignee: e.target.value })} style={{ minWidth: 140 }}>
-                                  <option value="">Select user</option>
+                                  <option value="">Select staff</option>
                                   {users.filter(u => u.role !== 'SuperAdmin' && u.role !== 'User').map(u => (
                                     <option key={u._id} value={u._id}>{u.username} ({u.role})</option>
                                   ))}
@@ -149,16 +183,18 @@ const ComplaintsDashboardPage = () => {
                                 <button onClick={() => setAssignTarget({ complaintId: null, assignee: '' })} className="btn-secondary btn-sm">Cancel</button>
                               </div>
                             ) : (
-                              <button onClick={() => handleAssignClick(c._id)} className="btn-primary btn-sm">Assign</button>
+                              <button onClick={() => handleAssignClick(c._id)} className="btn-primary btn-sm" style={{ width: '100%' }}>👤 Assign Staff</button>
                             )
                           )}
 
-                          {(isAssignee || user?.role === 'SuperAdmin') && (
+                          {/* Detailed Status Selector */}
+                          {canManage && (
                             statusTarget.complaintId === c._id ? (
                               <div className="actions-cell">
                                 <select className="status-select" value={statusTarget.status} onChange={(e) => setStatusTarget({ ...statusTarget, status: e.target.value })}>
                                   <option value="">Select status</option>
                                   <option value="Pending">Pending</option>
+                                  <option value="Assigned">Assigned</option>
                                   <option value="In-Progress">In-Progress</option>
                                   <option value="Onhold">Onhold</option>
                                   <option value="Closed">Closed</option>
@@ -167,7 +203,7 @@ const ComplaintsDashboardPage = () => {
                                 <button onClick={() => setStatusTarget({ complaintId: null, status: '' })} className="btn-secondary btn-sm">Cancel</button>
                               </div>
                             ) : (
-                              <button onClick={() => handleStatusClick(c._id)} className="btn-primary btn-sm">Update Status</button>
+                              <button onClick={() => handleStatusClick(c._id)} className="btn-secondary btn-sm" style={{ width: '100%' }}>🔄 Status Dropdown</button>
                             )
                           )}
                         </div>
